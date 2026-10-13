@@ -1,0 +1,34 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+*.pdb
+
+# Local environment — .env.example IS tracked, .env is NOT
+.env
+.env.*
+!.env.example
+
+# Local database volumes and Docker state
+/postgres-data/
+docker-compose.override.yml
+
+# Test artifacts
+/chaos/runs/
+/benchmarks/results/raw/
+*.trace
+
+# Chaos experiment recordings (seeds must be committed, raw output must not)
+*.seed
+/evidence/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+
+# Keep skills-lock.json — it pins skill provenance for reproducibility
+!skills-lock.json

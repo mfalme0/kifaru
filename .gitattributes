@@ -1,0 +1,28 @@
+# Normalize line endings in the repository.
+# Checked-in files use LF; git converts on the Windows working copy only.
+# This keeps diffs stable and reproducible across contributors' platforms.
+* text=auto eol=lf
+
+# Windows scripts genuinely need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files - never touch.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+
+# Keep Rust source and migrations strictly LF.
+*.rs        text eol=lf
+*.toml      text eol=lf
+*.sql       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
