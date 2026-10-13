@@ -1,0 +1,12 @@
+[package]
+name = "kifaru-application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kifaru-domain.workspace = true
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

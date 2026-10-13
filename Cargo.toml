@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/kifaru-domain",
+    "crates/kifaru-application",
+    "crates/kifaru-storage",
+    "crates/kifaru-api",
+    "crates/kifaru-testkit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+
+[workspace.dependencies]
+# --- internal crates -------------------------------------------------------
+kifaru-domain = { path = "crates/kifaru-domain" }
+kifaru-application = { path = "crates/kifaru-application" }
+kifaru-storage = { path = "crates/kifaru-storage" }
+kifaru-testkit = { path = "crates/kifaru-testkit" }
+
+# --- external --------------------------------------------------------------
+# Kept deliberately small. Every entry here must be justified in an ADR before
+# it is used outside the crate that motivated it.
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+
+[profile.release]
+# Benchmarks and load tests depend on these being stable and documented.
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"

@@ -1,0 +1,56 @@
+# KIFARU local dependencies.
+#
+# Reproducibility rules:
+#   * PostgreSQL is pinned to a MAJOR version and never `:latest`. The entire
+#     design rests on specific `READ COMMITTED` / `FOR UPDATE` / `SKIP LOCKED` /
+#     `REPEATABLE READ` semantics, so an unannounced major bump on
+#     `docker compose pull` is a correctness risk, not a compatibility nit.
+#   * PGDATA is on a real volume, never tmpfs. Durability is the point.
+#
+# Credentials come from `.env` (gitignored). Copy `.env.example` to `.env` first;
+# the `${POSTGRES_PASSWORD:?...}` form deliberately fails loudly if it is unset
+# rather than falling back to a default password.
+
+name: kifaru
+
+services:
+  postgres:
+    # Pinned major. Change only deliberately, with a migration review.
+    image: postgres:17
+    container_name: kifaru-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kifaru}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (copy .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-kifaru}
+      # Deterministic collation so index ordering does not vary by host locale.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      # Exposed so `cargo nextest` on the host can reach it. Not for production.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    command:
+      - postgres
+      # Headroom for concurrency tests, which open many connections at once.
+      - -c
+      - max_connections=200
+      # These three exist so lock contention and deadlocks are *visible in logs*
+      # when a concurrency test deliberately provokes them. Without them a
+      # deadlock retry is invisible and impossible to diagnose.
+      - -c
+      - log_lock_waits=on
+      - -c
+      - deadlock_timeout=200ms
+      - -c
+      - log_min_duration_statement=250
+
+volumes:
+  postgres-data:
+    name: kifaru-postgres-data

@@ -1,0 +1,12 @@
+[package]
+name = "kifaru-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kifaru-domain.workspace = true
+kifaru-application.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

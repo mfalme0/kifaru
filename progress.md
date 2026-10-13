@@ -31,13 +31,18 @@ Status vocabulary used throughout this file: **verified** = observed/confirmed b
 by inspection this session; **planned** = decided, not yet built; **blocked** = cannot proceed
 until an external prerequisite clears.
 
-- [ ] **BLOCKED (owner: user)** — Rust toolchain not installed. `rustc`, `cargo` and `rustup`
-  are all absent from the host. Nothing can be compiled, tested, linted or benchmarked until
-  this is done. User has agreed to install it themselves; **not yet confirmed done.**
-- [ ] **BLOCKED (owner: user)** — Docker daemon not running. Docker CLI and Docker Compose
-  v5.3.1 are present, but the Linux engine pipe is dead, so no container (including the
-  Postgres instance the whole design depends on) can start. User has agreed to start Docker
-  Desktop; **not yet confirmed done.**
+- [x] ~~**BLOCKED (owner: user)** — Rust toolchain not installed.~~ **CLEARED 2026-10-13.
+  `verified`** — Toolchain installed at `%USERPROFILE%\.cargo\bin` but NOT on the agent
+  shell's PATH; commands must be run with that bin directory prepended. Observed:
+  `rustc 1.99.0 (b940084d7 2026-09-28)`, `cargo 1.99.0 (5f94df478 2026-08-27)`,
+  `rustup 1.29.1 (d95a37b6a 2026-08-13)`, toolchain
+  `stable-x86_64-pc-windows-msvc (active, default)`. End-to-end verified by compiling,
+  linking and executing a scratch binary: `cargo build` -> `Finished dev profile in 2.05s`,
+  binary ran and exited 0. MSVC linker is present and working.
+- [x] ~~**BLOCKED (owner: user)** — Docker daemon not running.~~ **CLEARED 2026-10-13.
+  `verified`** — `docker version` reports `client=29.6.2 server=29.6.2`, so the daemon is
+  live and reachable. Note: Compose is v5.3.1 while the engine reports 29.6.2; no Postgres
+  container has been started yet, so image pull and container start are still unproven.
 - [ ] Not a blocker, accepted: `psql` is not installed. Docker-hosted Postgres covers this
   for Phase 0. Revisit only if we ever need a direct client outside containers.
 - [ ] Deferred by agreement, not a blocker: `k6` / `vegeta` load generators are absent.
@@ -95,6 +100,56 @@ Each item is labeled with its evidence level. Nothing here implies working code.
   `source`, `sourceType`, `skillPath` and a `computedHash` SHA-256 per skill. The hash is a
   content pin, so a future agent CAN detect whether `.agents/skills/` has drifted from the
   recorded source. This resolves the "no version pin" concern.
+- [x] `verified` — **BUILD STARTED 2026-10-13/14. Toolchain chain proven end to end:**
+  `rustc 1.99.0`, `cargo 1.99.0`, `rustup 1.29.1`, host
+  `x86_64-pc-windows-msvc`. `rust-toolchain.toml` pins `channel = "1.99.0"` with
+  `rustfmt` + `clippy`, and rustup auto-installed that toolchain on first build. MSVC
+  linking verified by compiling, linking and executing a scratch binary.
+  `cargo-nextest v0.9.148` installed via `cargo install cargo-nextest --locked`.
+  NOTE FOR FUTURE AGENTS: `%USERPROFILE%\.cargo\bin` is NOT on the agent shell's PATH;
+  prepend it or absolute paths fail.
+- [x] `verified` — **Workspace created and compiling.** `Cargo.toml` (workspace,
+  resolver 3, edition 2024, rust-version 1.99) plus five crates:
+  `kifaru-domain`, `kifaru-application`, `kifaru-storage`, `kifaru-api`, `kifaru-testkit`.
+  Only `kifaru-domain` has real content; the other four are compiling stubs.
+  `cargo build --workspace` -> `Finished dev profile in 29.89s`.
+- [x] `verified` — **`kifaru-domain` implemented.** `money.rs` (`Currency`, `Money` as
+  non-negative `i64` minor units, checked add/sub, no float), `account.rs` (`AccountId`
+  UUIDv7, `AccountStatus` state machine with terminal `Closed`, `debit`/`credit`),
+  `transfer.rs` (`TransferId`, `TransferStatus` Pending->Completed/Failed with both
+  terminal, self-transfer and zero-amount rejected), `ledger.rs` (`EntryDirection`,
+  immutable `LedgerEntry` with no mutating API, `LedgerTransaction` that can only be built
+  as a balanced pair, `derived_balance_minor_units` for reconciliation), `error.rs`.
+- [x] `verified` — **`cargo nextest run --workspace` -> 31 tests run, 31 passed, 0 skipped**
+  (0.296s). These are domain unit tests only; none touches a database.
+- [x] `verified` — `cargo fmt --all --check` -> exit 0 after applying `cargo fmt --all`.
+- [x] `verified` — `cargo clippy --workspace --all-targets -- -D warnings` -> exit 0,
+  zero warnings.
+- [x] `verified` — `docker-compose.yml` written: `postgres:17` **pinned by major, never
+  `:latest`**, UTF8/`locale=C` initdb args for deterministic collation, healthcheck,
+  `max_connections=200`, and `log_lock_waits=on` / `deadlock_timeout=200ms` /
+  `log_min_duration_statement=250` so lock contention is visible in logs.
+- [x] `verified` — `.env.example` written with placeholders only. Compose fails loudly on
+  an unset `POSTGRES_PASSWORD` rather than defaulting, so there is no hardcoded credential.
+- [x] `verified` — **PORT CONFLICT RESOLVED, and this is why the port differs from the
+  standard.** Host port 5432 is held by an unrelated project (`betterfarm_db`,
+  `postgis/postgis:16-3.4`) and 5433 by another (`neo-learn-postgres`). KIFARU therefore
+  runs on **5434**. Those containers were NOT touched. `POSTGRES_PORT=5434` and
+  `DATABASE_URL` updated in `.env`.
+- [x] `verified` — Postgres 17 container `kifaru-postgres` up and **`healthy`** on
+  `0.0.0.0:5434->5432/tcp`.
+- [x] `verified` — `migrations/0001_init.sql` applied cleanly to the live database
+  (BEGIN..COMMIT, 6 tables, 9 indexes, 1 trigger function + trigger, exit 0). Tables:
+  `accounts`, `transfers`, `ledger_entries`, `idempotency_keys`, `outbox_events`,
+  `consumer_inbox`.
+- [x] `verified` — **`tests/invariants/schema_constraints.sql` executed against live
+  Postgres: 16 checks, ALL ENFORCED, script exit 0.** This is real evidence, not an
+  assumption: each invariant was deliberately violated and the database refused.
+  Confirmed: INV-1 (insert and update), INV-2 (second debit for one transfer),
+  INV-6 + per-client key scoping, INV-7 (UPDATE and DELETE both blocked by trigger),
+  consumer dedupe, self-transfer, zero amount, failure-reason required/absent,
+  FK to unknown account, outbox `delivered`/`dead` column consistency.
+  Script rolls back, so it leaves no data behind.
 
 ## In progress
 
