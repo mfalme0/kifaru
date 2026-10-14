@@ -673,8 +673,9 @@ dependencies = [
  "chrono",
  "kifaru-domain",
  "serde",
- "serde_json",
+ "sha2",
  "thiserror",
+ "tokio",
  "uuid",
 ]
 
@@ -692,11 +693,12 @@ dependencies = [
 name = "kifaru-storage"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "kifaru-application",
  "kifaru-domain",
- "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "thiserror",
  "tokio",

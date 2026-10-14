@@ -1,13 +1,20 @@
-//! Database models and conversion helpers.
+//! Row types and fallible conversions into domain entities.
+//!
+//! Every conversion that parses a string column returns a `Result`. The previous
+//! draft of this file defaulted an unrecognised `status` to `Suspended`; that is
+//! exactly the kind of silent coercion that turns a schema bug into a security
+//! incident, so it is gone.
 
+use crate::error::StorageError;
 use chrono::{DateTime, Utc};
 use kifaru_domain::{
-    Account, AccountId, AccountStatus, Currency, EntryDirection, LedgerEntry, Money, TransferId,
+    Account, AccountId, AccountStatus, Currency, EntryDirection, FailureReason, LedgerEntry, Money,
+    Transfer, TransferId, TransferStatus,
 };
-use sqlx::types::Uuid;
+use uuid::Uuid;
 
-/// Row from accounts table
-#[derive(sqlx::FromRow, Debug)]
+/// `accounts` row.
+#[derive(sqlx::FromRow, Debug, Clone)]
 pub struct AccountRow {
     pub id: Uuid,
     pub status: String,
@@ -17,32 +24,66 @@ pub struct AccountRow {
     pub created_at: DateTime<Utc>,
 }
 
-impl From<AccountRow> for Account {
-    fn from(row: AccountRow) -> Self {
-        let status = match row.status.as_str() {
-            "active" => AccountStatus::Active,
-            "suspended" => AccountStatus::Suspended,
-            "closed" => AccountStatus::Closed,
-            _ => AccountStatus::Suspended,
-        };
-        let currency = match row.currency.as_str() {
-            "KES" => Currency::Kes,
-            _ => Currency::configured(),
-        };
-        let balance = Money::from_minor_units(row.balance_minor, currency).expect("valid balance");
-        Account::from_parts(
+impl TryFrom<AccountRow> for Account {
+    type Error = StorageError;
+
+    fn try_from(row: AccountRow) -> Result<Self, Self::Error> {
+        let status = parse_account_status(&row.status)?;
+        let currency = parse_currency(&row.currency)?;
+        // Negative balances are impossible by CHECK constraint (INV-1). If one
+        // is ever observed, refuse to build the entity rather than panic.
+        let balance = Money::from_minor_units(row.balance_minor, currency).map_err(|e| {
+            StorageError::RowInvariant(format!("accounts.balance_minor={}: {e}", row.balance_minor))
+        })?;
+        Ok(Account::from_parts(
             AccountId::from_uuid(row.id),
             status,
             currency,
             balance,
             row.version,
             row.created_at,
-        )
+        ))
     }
 }
 
-/// Row from ledger_entries table
-#[derive(sqlx::FromRow, Debug)]
+/// `transfers` row.
+#[derive(sqlx::FromRow, Debug, Clone)]
+pub struct TransferRow {
+    pub id: Uuid,
+    pub source_account_id: Uuid,
+    pub destination_account_id: Uuid,
+    pub amount_minor: i64,
+    pub currency: String,
+    pub status: String,
+    pub failure_reason: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<TransferRow> for Transfer {
+    type Error = StorageError;
+
+    fn try_from(row: TransferRow) -> Result<Self, Self::Error> {
+        let status = parse_transfer_status(&row.status)?;
+        let currency = parse_currency(&row.currency)?;
+        let amount = Money::from_minor_units(row.amount_minor, currency).map_err(|e| {
+            StorageError::RowInvariant(format!("transfers.amount_minor={}: {e}", row.amount_minor))
+        })?;
+        Ok(Transfer::from_parts(
+            TransferId::from_uuid(row.id),
+            AccountId::from_uuid(row.source_account_id),
+            AccountId::from_uuid(row.destination_account_id),
+            amount,
+            status,
+            row.failure_reason.map(FailureReason::new),
+            row.created_at,
+            row.updated_at,
+        ))
+    }
+}
+
+/// `ledger_entries` row.
+#[derive(sqlx::FromRow, Debug, Clone)]
 pub struct LedgerEntryRow {
     pub id: Uuid,
     pub transfer_id: Uuid,
@@ -53,25 +94,92 @@ pub struct LedgerEntryRow {
     pub created_at: DateTime<Utc>,
 }
 
-impl From<LedgerEntryRow> for LedgerEntry {
-    fn from(row: LedgerEntryRow) -> Self {
-        let direction = match row.direction.as_str() {
-            "debit" => EntryDirection::Debit,
-            "credit" => EntryDirection::Credit,
-            _ => EntryDirection::Debit,
-        };
-        let currency = match row.currency.as_str() {
-            "KES" => Currency::Kes,
-            _ => Currency::configured(),
-        };
-        let amount = Money::from_minor_units(row.amount_minor, currency).expect("valid amount");
-        LedgerEntry::from_parts(
+impl TryFrom<LedgerEntryRow> for LedgerEntry {
+    type Error = StorageError;
+
+    fn try_from(row: LedgerEntryRow) -> Result<Self, Self::Error> {
+        let direction = parse_entry_direction(&row.direction)?;
+        let currency = parse_currency(&row.currency)?;
+        let amount = Money::from_minor_units(row.amount_minor, currency).map_err(|e| {
+            StorageError::RowInvariant(format!(
+                "ledger_entries.amount_minor={}: {e}",
+                row.amount_minor
+            ))
+        })?;
+        Ok(LedgerEntry::from_parts(
             row.id,
             TransferId::from_uuid(row.transfer_id),
             AccountId::from_uuid(row.account_id),
             direction,
             amount,
             row.created_at,
-        )
+        ))
+    }
+}
+
+/// `idempotency_keys` row, projected to just what the resolve path needs.
+#[derive(sqlx::FromRow, Debug)]
+pub struct IdempotencyRow {
+    pub request_hash: Vec<u8>,
+    pub transfer_id: Option<Uuid>,
+    pub response_status: Option<i16>,
+    /// For a committed success this is the outbox payload (informational). For a
+    /// recorded rejection it is the serialised [`kifaru_application::Rejection`],
+    /// which is what lets a retry reproduce the original typed error.
+    pub response_body: Option<serde_json::Value>,
+}
+
+/// `outbox_events` row.
+#[derive(sqlx::FromRow, Debug, Clone)]
+pub struct OutboxEventRow {
+    pub id: Uuid,
+    pub aggregate_id: Uuid,
+    pub event_type: String,
+    pub payload: serde_json::Value,
+    pub state: String,
+    pub attempts: i32,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub delivered_at: Option<DateTime<Utc>>,
+}
+
+pub(crate) fn parse_account_status(raw: &str) -> Result<AccountStatus, StorageError> {
+    match raw {
+        "active" => Ok(AccountStatus::Active),
+        "suspended" => Ok(AccountStatus::Suspended),
+        "closed" => Ok(AccountStatus::Closed),
+        other => Err(StorageError::RowInvariant(format!(
+            "unknown account status {other:?}"
+        ))),
+    }
+}
+
+pub(crate) fn parse_transfer_status(raw: &str) -> Result<TransferStatus, StorageError> {
+    match raw {
+        "pending" => Ok(TransferStatus::Pending),
+        "completed" => Ok(TransferStatus::Completed),
+        "failed" => Ok(TransferStatus::Failed),
+        other => Err(StorageError::RowInvariant(format!(
+            "unknown transfer status {other:?}"
+        ))),
+    }
+}
+
+pub(crate) fn parse_entry_direction(raw: &str) -> Result<EntryDirection, StorageError> {
+    match raw {
+        "debit" => Ok(EntryDirection::Debit),
+        "credit" => Ok(EntryDirection::Credit),
+        other => Err(StorageError::RowInvariant(format!(
+            "unknown ledger direction {other:?}"
+        ))),
+    }
+}
+
+pub(crate) fn parse_currency(raw: &str) -> Result<Currency, StorageError> {
+    match raw {
+        "KES" => Ok(Currency::Kes),
+        other => Err(StorageError::RowInvariant(format!(
+            "unknown currency {other:?}"
+        ))),
     }
 }
