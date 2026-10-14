@@ -32,3 +32,4 @@ Thumbs.db
 
 # Keep skills-lock.json — it pins skill provenance for reproducibility
 !skills-lock.json
+progress.md

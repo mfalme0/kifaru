@@ -1,10 +1,8 @@
-//! PostgreSQL adapters.
-//!
-//! Implements the ports declared in `kifaru-application`. This is the only crate
-//! that knows SQL or `sqlx`.
-//!
-//! Populated in the next step of the build sequence.
+//! Main storage module.
 
-#![forbid(unsafe_code)]
+pub mod accounts;
+pub mod error;
+pub mod models;
 
-pub use kifaru_domain as domain;
+pub use accounts::AccountRepo;
+pub use error::{DomainError, StorageError, is_retriable_db_error};

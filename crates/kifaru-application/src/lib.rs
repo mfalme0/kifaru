@@ -1,11 +1,7 @@
-//! Application services and the ports they depend on.
-//!
-//! This crate orchestrates domain rules against storage. It defines *ports*
-//! (traits) and never depends on a concrete database, so the transfer logic can
-//! be tested against an in-memory implementation.
-//!
-//! Populated in the next step of the build sequence.
+//! Application ports and transfer service.
 
-#![forbid(unsafe_code)]
+pub mod ports;
+pub mod transfer_service;
 
-pub use kifaru_domain as domain;
+pub use ports::{AccountRepository, IdempotencyRepository, LedgerRepository, OutboxPublisher};
+pub use transfer_service::{TransferCommand, TransferResult, TransferServiceError};
