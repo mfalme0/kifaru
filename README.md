@@ -1,4 +1,4 @@
-﻿![Progress](https://img.shields.io/badge/progress-1.5%2F6%20phases-blue)
+﻿![Progress](https://img.shields.io/badge/progress-47%25-4CAF50)
 
 # KIFARU
 
