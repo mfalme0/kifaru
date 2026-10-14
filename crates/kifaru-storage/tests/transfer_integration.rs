@@ -14,13 +14,11 @@
 //! cargo nextest run -p kifaru-storage
 //! ```
 
-mod common;
-
-use common::{Harness, client, key};
 use kifaru_application::ports::{AccountDirectory, SubmitTransfer, TransferReader};
 use kifaru_application::{TransferService, TransferServiceError};
 use kifaru_domain::{AccountId, TransferStatus};
 use kifaru_storage::sqlx;
+use kifaru_testkit::harness::{Harness, client, key};
 use std::sync::Arc;
 use uuid::Uuid;
 

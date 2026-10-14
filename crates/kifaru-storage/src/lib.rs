@@ -13,7 +13,8 @@ pub mod models;
 pub mod pg;
 
 pub use error::{StorageError, is_retriable_db_error};
-pub use pg::{PgAccountDirectory, PgTransferRepository};
+pub use models::OutboxState;
+pub use pg::{OutboxEvent, PgAccountDirectory, PgOutboxStore, PgTransferRepository};
 
 /// Re-exported so integration tests and the API crate can name the exact driver
 /// version this crate was compiled against, instead of depending on a second

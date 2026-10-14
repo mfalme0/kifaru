@@ -10,8 +10,11 @@
 --
 -- Invariant coverage is called out per constraint as INV-n. The authoritative
 -- definitions live in docs/invariants.md.
-
-BEGIN;
+--
+-- NOTE: there is deliberately no explicit BEGIN/COMMIT here. sqlx wraps each
+-- migration in a transaction and records it in _sqlx_migrations; a COMMIT inside
+-- the file would end that transaction early and break the applied-migration
+-- bookkeeping that makes `migrate` idempotent.
 
 -- ---------------------------------------------------------------------------
 -- accounts
@@ -213,5 +216,3 @@ CREATE TABLE consumer_inbox (
 
     PRIMARY KEY (consumer, event_id)
 );
-
-COMMIT;

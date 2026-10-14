@@ -234,6 +234,22 @@ BEGIN
     EXCEPTION WHEN check_violation THEN
         PERFORM _record('outbox-dead-error', true, 'dead event without last_error rejected');
     END;
+
+    -- Migration 0002 relaxed a biconditional to an implication. A PENDING event
+    -- may now carry its most recent failure, which is what makes a retrying
+    -- event diagnosable instead of merely countable. This was previously
+    -- *unrepresentable*, not merely discouraged, and is asserted here so the
+    -- relaxation cannot be silently reverted.
+    BEGIN
+        INSERT INTO outbox_events (id, aggregate_id, event_type, payload, state, attempts,
+                                   next_attempt_at, last_error, created_at)
+        VALUES (gen_random_uuid(), fx.transfer, 'transfer.completed', '{}'::jsonb, 'pending',
+                2, now(), 'broker unavailable', now());
+        PERFORM _record('outbox-pending-error', true, 'pending event may record its last failure');
+    EXCEPTION WHEN check_violation THEN
+        PERFORM _record('outbox-pending-error', false,
+            'a PENDING event carrying last_error was REFUSED — migration 0002 appears reverted');
+    END;
 END $$;
 
 -- ===========================================================================

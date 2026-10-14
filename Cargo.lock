@@ -802,12 +802,14 @@ dependencies = [
 name = "kifaru-api"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "chrono",
  "http-body-util",
  "kifaru-application",
  "kifaru-domain",
  "kifaru-storage",
+ "kifaru-testkit",
  "serde",
  "serde_json",
  "sqlx",
@@ -851,6 +853,7 @@ dependencies = [
  "chrono",
  "kifaru-application",
  "kifaru-domain",
+ "kifaru-testkit",
  "serde_json",
  "sha2",
  "sqlx",
@@ -867,6 +870,9 @@ dependencies = [
  "kifaru-application",
  "kifaru-domain",
  "kifaru-storage",
+ "serde_json",
+ "sqlx",
+ "tokio",
  "uuid",
 ]
 

@@ -8,9 +8,14 @@
 
 pub mod config;
 pub mod http;
+pub mod worker;
 
 pub use config::{Config, ConfigError, LogFormat};
 pub use http::{AppState, router};
+pub use worker::{
+    BatchReport, DedupeConsumer, EventPublisher, LoggingPublisher, OutboxWorker, PublishError,
+    WorkerConfig, WorkerConfigError,
+};
 
 /// Apply pending migrations from the repository `migrations/` directory.
 ///

@@ -478,3 +478,88 @@ If a claim in this file cannot be traced to a command that was actually run, tre
 unverified. When a blocker clears, update `Blockers`, update `Done` with the observed version
 output, and note the clearing in the session log. A full rewrite like this one is only
 authorized at a phase boundary or at session end — never mid-stream.
+### 2026-10-14 - Phase 1 and 2 core VERIFIED: atomic transfer + outbox worker
+
+Append-only checkpoint. Statuses are as observed by actually running the commands
+named below; nothing here is projected.
+
+**erified - core correctness (Phase 1), observed by cargo nextest run --workspace:**
+
+- Atomic transfer execution. One PostgreSQL transaction covers both balance
+  updates, the transfer row, both ledger entries, the outbox event, and the
+  idempotency record. Port design was changed first: the original per-entity
+  repository traits each took a `PgPool` and would therefore have opened
+  separate transactions, making atomicity structurally impossible. Replaced with
+  a single coarse `TransferRepository::execute` whose contract *is* atomicity.
+- Deadlock avoidance by lock ordering: one `SELECT ... WHERE id = ANY()
+  ORDER BY id FOR UPDATE`. `READ COMMITTED` retained; row locks are the
+  correctness mechanism. `SERIALIZABLE` still rejected.
+- Idempotency via `INSERT ... ON CONFLICT DO NOTHING` to claim the key, then
+  `FOR UPDATE` which blocks a duplicate until the winner commits and replays
+  the committed outcome. Same key + different body = 409.
+- A rejected transfer is recorded (`failed` row + idempotency record, no money
+  moved, no ledger entries) so a retry is deterministic.
+- 87 tests total: domain 31, application 13, storage 15 (2 unit + 13
+  integration), api 28 (13 unit + 14 integration + 7 config).
+- Concurrency proof: 20 simultaneous 100-minor-unit transfers from a 1000
+  balance yield exactly 10 commits and 10 refusals, landing on exactly zero.
+
+**erified - outbox worker (Phase 2), observed by `cargo nextest run` plus a
+live `serve` + `worker` smoke run:**
+
+- Claim-and-lease in a single statement with `FOR UPDATE SKIP LOCKED`, so two
+  concurrent workers take disjoint batches and there is no select-but-not-lease
+  window.
+- At-least-once: an expired lease makes an event redeliverable. Tested by
+  claiming with a 1s lease, asserting no other worker may take it during the
+  lease, then asserting redelivery after expiry.
+- Consumer-side dedupe via `consumer_inbox`; a redelivered event yields exactly
+  one side effect, and dedupe is scoped per consumer.
+- Retry with exponential backoff, dead-lettering at `max_attempts`, per-event
+  failure isolation (a poison event does not abort its batch).
+- Two bugs found by these tests and fixed: `1u32 << 32` shift overflow in
+  `backoff_for` (panicked in debug), and a claim/lease query that could report
+  `attempts` inconsistently.
+- Smoke: HTTP POST returned 201, identical retry returned 200 `replayed:true`,
+  same key + different body returned 409; `worker` drained 60 pending to 0
+  (112 -> 172 delivered).
+
+**erified - two schema/procedural problems found and fixed:**
+
+1. `migrations/0001_init.sql` contained explicit `BEGIN;`/`COMMIT;` while
+   the harness applied it via psql. sqlx manages its own transaction and records
+   rows in `_sqlx_migrations`, which did not exist. Migrations are now
+   sqlx-owned and `migrate` is idempotent. Verified: `_sqlx_migrations`
+   records versions 1 and 2.
+2. `outbox_dead_has_error` was a biconditional,
+   `(state='dead') = (last_error IS NOT NULL)`, which made a *pending* event's
+   last failure **unrepresentable**. A retrying event could show only that it had
+   been attempted N times, never why. Migration 0002 relaxes it to an implication,
+   preserving the guarantee that mattered (a dead event always carries its error)
+   while making the retry path diagnosable. This is not an INV-n change.
+
+**erified - DB invariant script: 17/17 ENFORCED** (was 16). Added
+`outbox-pending-error` to assert the 0002 relaxation has not been reverted.
+
+**erified - test isolation fixed.** The outbox is one global queue, so parallel
+tests drained each other's events and assertions about claim counts were racy.
+Each test now gets a private PostgreSQL schema (`Harness` sets `search_path`
+via `after_connect` and runs migrations into it, dropping it on cleanup). The
+suite is parallel and non-flaky. The DB harness moved into `kifaru-testkit`
+so storage and api tests share one definition.
+
+**planned - next, in order:**
+
+1. `kifaru reconcile`: read-only `REPEATABLE READ` snapshot, per-account
+   stored-vs-derived comparison, JSON report, non-zero exit on critical, never
+   auto-repair.
+2. INV-8 assertions: per-row `i64` -> `BIGINT` -> `i64` round-trip.
+3. HTTP integration tests over the router (currently the API is covered by unit
+   tests plus a manual smoke run, not by an automated end-to-end test).
+4. Known gap to close or document: no money-*in* path, so a transfer cannot be
+   driven over HTTP without seeding a balance directly.
+
+**Learned:** a coarse port whose contract is atomicity is a better shape than
+several fine-grained ports that each open their own connection. And an integration
+suite that shares a global queue is not parallel-safe no matter how careful the
+individual assertions are; isolation belongs at the schema level.

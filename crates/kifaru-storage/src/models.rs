@@ -143,6 +143,42 @@ pub struct OutboxEventRow {
     pub delivered_at: Option<DateTime<Utc>>,
 }
 
+/// Lifecycle of a single outbox event.
+///
+/// `Pending` is the only state a worker may claim. The other two are terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OutboxState {
+    Pending,
+    Delivered,
+    Dead,
+}
+
+impl OutboxState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            OutboxState::Pending => "pending",
+            OutboxState::Delivered => "delivered",
+            OutboxState::Dead => "dead",
+        }
+    }
+
+    /// Parse the `state` column.
+    ///
+    /// An unrecognised value is an error rather than a default: silently
+    /// treating an unknown state as `pending` would make a dead-lettered event
+    /// look claimable again.
+    pub fn parse(raw: &str) -> Result<Self, StorageError> {
+        match raw {
+            "pending" => Ok(OutboxState::Pending),
+            "delivered" => Ok(OutboxState::Delivered),
+            "dead" => Ok(OutboxState::Dead),
+            other => Err(StorageError::RowInvariant(format!(
+                "unknown outbox state {other:?}"
+            ))),
+        }
+    }
+}
+
 pub(crate) fn parse_account_status(raw: &str) -> Result<AccountStatus, StorageError> {
     match raw {
         "active" => Ok(AccountStatus::Active),

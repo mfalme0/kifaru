@@ -1,12 +1,14 @@
-﻿![Progress](https://img.shields.io/badge/progress-85%25-4CAF50)
+﻿![Progress](https://img.shields.io/badge/progress-90%25-4CAF50)
 
 # KIFARU
 
 **Transaction reliability platform â€” a correctness-first simulation of mobile-money transfer processing, written in Rust.**
 
-> **Status: Phase 0. No application code exists yet.**
-> This README describes the committed design. Anything not yet built is labeled
-> `[PLANNED]`. Nothing in this document is a claim about measured results.
+> **Status: Phases 0–2 (correctness core + outbox) built and verified against a
+> live PostgreSQL.** 87 automated tests pass. Reconciliation, observability
+> hardening, and benchmarks remain `[PLANNED]`.
+> Every feature claim below is labeled. Nothing here is a claim about measured
+> performance, and no benchmark has been run yet.
 > See [progress.md](./progress.md) for live build state.
 
 ---
@@ -51,7 +53,7 @@ system and makes no PCI DSS or regulatory compliance claim. See
 ---
 
 ## 3. Architecture
-
+`[IMPLEMENTED]` - see `crates/` for the implementation
 `[PLANNED]`
 
 ```mermaid
@@ -157,22 +159,34 @@ in isolation.
 > **Not yet runnable.** Phase 0 has not produced a buildable system.
 > This section is written to the shape the final instructions will take.
 
-**Prerequisites** `[PLANNED]`
-
-- Rust (pinned via `rust-toolchain.toml`) â€” *not installed on this machine yet*
+**Prerequisites** `[IMPLEMENTED]`
+- Rust pinned via `rust-toolchain.toml` (verified: 1.99.0)
+- Docker Desktop with the Linux engine running (verified: PostgreSQL 17, host port 5434)
 - Docker Desktop with the Linux engine running â€” *daemon currently stopped*
 
-**Commands** `[PLANNED]`
+**Commands**
 
 ```sh
-docker compose up -d postgres     # dependencies
-cargo run -- migrate              # apply migrations
-cargo run -- seed                 # deterministic synthetic accounts
-cargo run -- serve                # API + worker
-cargo nextest run                 # full suite
-cargo run -- reconcile            # invariant check, non-zero exit on critical
-cargo run -- chaos --scenario all # documented failure suite
+docker compose up -d                # dependencies (postgres:17, pinned)
+cp .env.example .env                # then edit DATABASE_URL
+cargo run -- migrate                # apply migrations (idempotent)
+cargo run -- serve                  # HTTP API on KIFARU_BIND
+cargo run -- worker                 # drain the transactional outbox
+cargo run -- outbox-status          # event counts by state
+cargo nextest run --workspace       # full suite
+cargo run -- reconcile              # [PLANNED] invariant check, non-zero exit
+cargo run -- chaos --scenario all   # [PLANNED] documented failure suite
 ```
+
+`serve` and `worker` are separate processes. Running `worker` is what publishes
+committed transfers; `serve` alone leaves events pending, which is correct and
+observable via `outbox-status`.
+
+**Known gap:** the API has no money-*in* operation. Accounts open at zero and
+money only moves via a transfer, so a transfer cannot be demonstrated over HTTP
+without seeding a balance directly in the database. The integration tests do this
+via `Harness::seed_opening_balance`, documented as test-only. A real deposit path
+is `[PLANNED]`.
 
 Nothing here requires a paid service.
 
@@ -274,7 +288,7 @@ retried â€” its idempotency identity is resolved first.
 
 ## 11. Outbox delivery semantics
 
-`[PLANNED]`
+`[IMPLEMENTED]`
 
 The outbox event is committed in the same transaction as the transfer. A worker
 claims events with `SELECT ... FOR UPDATE SKIP LOCKED` plus a lease
@@ -287,8 +301,19 @@ worker's work is reclaimed when its lease expires.
 > documented operating assumptions, and idempotent consumer processing.**
 
 KIFARU does **not** claim exactly-once delivery, and this README will not be
-edited to imply otherwise. Consumers must dedupe on `event_id`; a simulated
-consumer demonstrating exactly that is part of the delivered evidence.
+edited to imply otherwise. Consumers must dedupe on `event_id`; `DedupeConsumer`
+does exactly that, and the tests assert that a redelivered event produces
+exactly one side effect.
+
+Claiming and leasing happen in a **single statement**, so there is no window in
+which an event is selected but not leased, and therefore no window in which two
+workers could both believe they own the same event.
+
+Failure handling is per event, so a poison event cannot abort its batch and
+strand the healthy events behind it. Each failure records why it failed against
+the event itself, releases the lease, and reschedules with exponential backoff.
+After `max_attempts` the event is dead-lettered, and the database refuses to let a
+dead event exist without the error that killed it.
 
 ---
 

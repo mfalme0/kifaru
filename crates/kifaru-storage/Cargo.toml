@@ -16,7 +16,11 @@ serde_json.workspace = true
 async-trait = "0.1"
 sha2.workspace = true
 
+# Integration tests get their fixtures from the shared testkit. This is a
+# dev-dependency cycle (testkit depends on storage) which Cargo permits: it
+# cannot leak into a production build.
 [dev-dependencies]
+kifaru-testkit.workspace = true
 tokio.workspace = true
 sqlx.workspace = true
 uuid.workspace = true
