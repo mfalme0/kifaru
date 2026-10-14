@@ -1,10 +1,10 @@
-﻿![Progress](https://img.shields.io/badge/progress-90%25-4CAF50)
+![Progress](https://img.shields.io/badge/progress-90%25-4CAF50)
 
 # KIFARU
 
-**Transaction reliability platform â€” a correctness-first simulation of mobile-money transfer processing, written in Rust.**
+**Transaction reliability platform — a correctness-first simulation of mobile-money transfer processing, written in Rust.**
 
-> **Status: Phases 0–2 (correctness core + outbox) built and verified against a
+> **Status: Phases 0-2 (correctness core + outbox) built and verified against a
 > live PostgreSQL.** 87 automated tests pass. Reconciliation, observability
 > hardening, and benchmarks remain `[PLANNED]`.
 > Every feature claim below is labeled. Nothing here is a claim about measured
@@ -37,18 +37,18 @@ things that actually break in production:
 - The service dies between "database committed" and "response sent" and the
   client's outcome is **unknown forever**.
 - A background worker publishes an event, then crashes before recording that it
-  did â€” and the consumer **double-counts**.
+  did — and the consumer **double-counts**.
 - A bug silently corrupts a balance, and nothing notices for months.
 
 KIFARU is built to make each of those failures *reproducible on demand* and to
 prove that the financial invariants survive them. The deliverable is not a
-feature count â€” it is a system a skeptical engineer can clone, break, and
+feature count — it is a system a skeptical engineer can clone, break, and
 independently verify.
 
 **This is a simulation.** It is not connected to any real payment network,
 financial institution, or customer account. It is **not** a certified financial
 system and makes no PCI DSS or regulatory compliance claim. See
-[Â§15 Security](#15-security-and-threat-model).
+[§15 Security](#15-security-and-threat-model).
 
 ---
 
@@ -91,7 +91,7 @@ flowchart TD
 | Reconciliation | **Asynchronous** (separate command) | Nothing. It is an independent audit. |
 
 A successful transfer response means: *these two balances moved, these two
-ledger entries exist, and an outbox event recording that fact is committed â€” all
+ledger entries exist, and an outbox event recording that fact is committed — all
 in the same atomic database transaction.* It does **not** mean any downstream
 consumer has seen the event.
 
@@ -99,17 +99,17 @@ consumer has seen the event.
 
 ## 4. Technology choices
 
-`[DECIDED]` â€” chosen deliberately; rationale recorded in `docs/adr/`.
+`[DECIDED]` — chosen deliberately; rationale recorded in `docs/adr/`.
 
 | Choice | Why | Alternative rejected |
 |---|---|---|
-| **Rust** (stable, pinned) | Ownership model makes the "no partial state" invariant far easier to express and review. | Go â€” weaker static guarantees around financial invariants. |
-| **PostgreSQL as source of truth** | Real row locking, real isolation levels, real `SKIP LOCKED`. Proving concurrency guarantees requires the real engine. | SQLite â€” **explicitly rejected for anything testing locking or isolation.** |
-| **`i64` minor units** (`BIGINT`) | Exact by construction. Zero rounding-mode ambiguity. Maps 1:1 to SQLx. | `rust_decimal` â€” 96-bit, slower, and buys multi-currency generality this MVP doesn't need. Trade-off: a second currency with a different scale requires a scale-aware `Money` type. |
-| **`READ COMMITTED` + ordered `FOR UPDATE`** | Invariants carried by locks and constraints, not by a heavier isolation level. Locking accounts in ascending ID order eliminates the Aâ†’B / Bâ†’A deadlock without retry storms. | `SERIALIZABLE` â€” retry storms under contention for guarantees we don't need once both rows are locked. |
-| **Axum** | Tokio-native, tower middleware composes cleanly for auth/rate-limit/trace layers. | Actix â€” historically a separate async runtime. |
-| **SQLx** | Compile-time query verification; no hidden runtime SQL. | Diesel â€” less ergonomic async story. |
-| **Single binary, 3 subcommands** | One build, one lockfile, trivially reproducible local runs. | Multi-crate split now â€” adds build ceremony before any invariant is proven. |
+| **Rust** (stable, pinned) | Ownership model makes the "no partial state" invariant far easier to express and review. | Go — weaker static guarantees around financial invariants. |
+| **PostgreSQL as source of truth** | Real row locking, real isolation levels, real `SKIP LOCKED`. Proving concurrency guarantees requires the real engine. | SQLite — **explicitly rejected for anything testing locking or isolation.** |
+| **`i64` minor units** (`BIGINT`) | Exact by construction. Zero rounding-mode ambiguity. Maps 1:1 to SQLx. | `rust_decimal` — 96-bit, slower, and buys multi-currency generality this MVP doesn't need. Trade-off: a second currency with a different scale requires a scale-aware `Money` type. |
+| **`READ COMMITTED` + ordered `FOR UPDATE`** | Invariants carried by locks and constraints, not by a heavier isolation level. Locking accounts in ascending ID order eliminates the A→B / B→A deadlock without retry storms. | `SERIALIZABLE` — retry storms under contention for guarantees we don't need once both rows are locked. |
+| **Axum** | Tokio-native, tower middleware composes cleanly for auth/rate-limit/trace layers. | Actix — historically a separate async runtime. |
+| **SQLx** | Compile-time query verification; no hidden runtime SQL. | Diesel — less ergonomic async story. |
+| **Single binary, 3 subcommands** | One build, one lockfile, trivially reproducible local runs. | Multi-crate split now — adds build ceremony before any invariant is proven. |
 
 Deliberately **not** in the MVP `[UNSUPPORTED]`: Kafka, Kubernetes, service mesh,
 custom consensus. A real broker is a later milestone, never a prerequisite for
@@ -119,35 +119,35 @@ proving the core guarantees.
 
 ## 5. Repository layout
 
-`[PLANNED]` â€” five crates, not eight. Worker and observability are modules
+`[PLANNED]` — five crates, not eight. Worker and observability are modules
 inside `kifaru-api` until there's a genuine service boundary.
 
 ```
 kifaru/
-â”œâ”€â”€ Cargo.toml                  workspace
-â”œâ”€â”€ rust-toolchain.toml         pinned
-â”œâ”€â”€ README.md  progress.md
-â”œâ”€â”€ .env.example                placeholders only
-â”œâ”€â”€ docker-compose.yml          postgres + deps
-â”œâ”€â”€ migrations/                 sqlx migrations
-â”œâ”€â”€ crates/
-â”‚   â”œâ”€â”€ kifaru-domain/          money, currency, accounts, transfers, ledger, state machines
-â”‚   â”œâ”€â”€ kifaru-application/     transfer service, idempotency, reconciliation + port traits
-â”‚   â”œâ”€â”€ kifaru-storage/         sqlx impls, error classification
-â”‚   â”œâ”€â”€ kifaru-api/             axum routes, auth middleware, worker, observability, `main.rs`
-â”‚   â””â”€â”€ kifaru-testkit/         fixtures, seed data, invariant assertions
-â”œâ”€â”€ tests/
-â”‚   â”œâ”€â”€ integration/  concurrency/  recovery/  invariants/
-â”œâ”€â”€ benchmarks/  chaos/
-â”œâ”€â”€ docs/
-â”‚   â”œâ”€â”€ invariants.md           INV-1..INV-7, authoritative
-â”‚   â”œâ”€â”€ architecture/  adr/
-â”‚   â”œâ”€â”€ threat-model.md  failure-matrix.md
-â”‚   â””â”€â”€ benchmark-methodology.md  operations.md
-â””â”€â”€ .agents/skills/             project-scoped agent skills
+├── Cargo.toml                  workspace
+├── rust-toolchain.toml         pinned
+├── README.md  progress.md
+├── .env.example                placeholders only
+├── docker-compose.yml          postgres + deps
+├── migrations/                 sqlx migrations
+├── crates/
+│   ├── kifaru-domain/          money, currency, accounts, transfers, ledger, state machines
+│   ├── kifaru-application/     transfer service, idempotency, reconciliation + port traits
+│   ├── kifaru-storage/         sqlx impls, error classification
+│   ├── kifaru-api/             axum routes, auth middleware, worker, observability, `main.rs`
+│   └── kifaru-testkit/         fixtures, seed data, invariant assertions
+├── tests/
+│   ├── integration/  concurrency/  recovery/  invariants/
+├── benchmarks/  chaos/
+├── docs/
+│   ├── invariants.md           INV-1..INV-7, authoritative
+│   ├── architecture/  adr/
+│   ├── threat-model.md  failure-matrix.md
+│   └── benchmark-methodology.md  operations.md
+└── .agents/skills/             project-scoped agent skills
 ```
 
-Dependency direction is strict: `api` â†’ `application` â†’ `domain`.
+Dependency direction is strict: `api` → `application` → `domain`.
 `application` defines ports; `storage` implements them. Domain logic compiles
 and tests with **no database and no HTTP server**, so business rules are testable
 in isolation.
@@ -162,7 +162,6 @@ in isolation.
 **Prerequisites** `[IMPLEMENTED]`
 - Rust pinned via `rust-toolchain.toml` (verified: 1.99.0)
 - Docker Desktop with the Linux engine running (verified: PostgreSQL 17, host port 5434)
-- Docker Desktop with the Linux engine running â€” *daemon currently stopped*
 
 **Commands**
 
@@ -200,7 +199,7 @@ All monetary values are **`i64` minor units** (e.g. cents) stored as `BIGINT`.
 
 - Floating-point is **never** used for money, anywhere.
 - One configured currency with a documented minor-unit scale. The specific
-  currency and scale are **still to be pinned** â€” see [progress.md](./progress.md).
+  currency and scale are **still to be pinned** — see [progress.md](./progress.md).
 - Amounts must be strictly positive.
 - Rounding does not occur in the transfer path because there is nothing to
   round: both ledger legs carry the identical `i64` value.
@@ -224,7 +223,7 @@ authenticated client.
 | Concurrent identical requests | Serialized by the `UNIQUE (client_id, key)` index. The loser blocks, then replays the winner's result. |
 | Original commit succeeded but client never saw the response | Retry replays from the stored response. The uncertain-outcome case is resolved by identity, not by guessing. |
 
-Uniqueness lives in the **database**, not in application code â€” application-level
+Uniqueness lives in the **database**, not in application code — application-level
 checks cannot survive concurrent requests.
 
 **Retention:** idempotency records outlive the maximum client retry window and
@@ -235,11 +234,11 @@ concrete durations.
 
 ## 9. Ledger correctness guarantees
 
-`[PLANNED]` â€” the canonical definitions live in [`docs/invariants.md`](./docs/invariants.md)
+`[PLANNED]` — the canonical definitions live in [`docs/invariants.md`](./docs/invariants.md)
 and are referenced by every relevant test.
 
 - **INV-1** No account balance is negative under the default overdraft policy.
-- **INV-2** Every completed transfer has exactly two ledger entries â€” same
+- **INV-2** Every completed transfer has exactly two ledger entries — same
   `transfer_id`, same currency, equal magnitude, opposite direction.
 - **INV-3** Every ledger transaction balances: sum(debits) == sum(credits).
 - **INV-4** Stored account balance equals the balance derived from ledger entries.
@@ -282,7 +281,7 @@ not representable in a committed state.
 **Retry policy:** only on SQLSTATE `40001` (serialization failure) and `40P01`
 (deadlock). Maximum 3 attempts, jittered backoff, retrying the **entire**
 transaction. An operation with an uncertain commit outcome is never blindly
-retried â€” its idempotency identity is resolved first.
+retried — its idempotency identity is resolved first.
 
 ---
 
@@ -295,7 +294,7 @@ claims events with `SELECT ... FOR UPDATE SKIP LOCKED` plus a lease
 (`locked_until`, `locked_by`), so multiple workers are safe and a crashed
 worker's work is reclaimed when its lease expires.
 
-**The actual guarantee â€” stated precisely:**
+**The actual guarantee — stated precisely:**
 
 > **Durable publication intent, at-least-once delivery attempts under the
 > documented operating assumptions, and idempotent consumer processing.**
@@ -324,7 +323,7 @@ dead event exist without the error that killed it.
 Recomputes expected balances from the ledger inside a `REPEATABLE READ`
 read-only transaction, so in-flight transfers cannot produce false positives. It
 detects balance drift, transfers missing entries, unbalanced ledger
-transactions, invalid transferâ†”ledger relationships, and currency mismatches.
+transactions, invalid transfer↔ledger relationships, and currency mismatches.
 
 Output is a machine-readable JSON report. **Exit code is non-zero when a
 critical invariant fails**, so it works as a CI gate.
@@ -366,18 +365,18 @@ results**, until measurements exist.
 | API | Validation, authorization, status codes, error shape, pagination, limits. |
 | Regression | Every discovered correctness bug produces a regression test. |
 
-Fault scenarios assert **resulting database state and financial invariants** â€”
+Fault scenarios assert **resulting database state and financial invariants** —
 not merely that the process restarted. Deterministic injection runs in CI;
 randomized chaos runs separately with recorded seeds.
 
-See [`docs/failure-matrix.md`](./docs/failure-matrix.md) for the scenario â†’
-expected outcome â†’ recovery â†’ test mapping. **Not yet written.**
+See [`docs/failure-matrix.md`](./docs/failure-matrix.md) for the scenario →
+expected outcome → recovery → test mapping. **Not yet written.**
 
 ---
 
 ## 15. Security and threat model
 
-`[PLANNED]` â€” full threat model in [`docs/threat-model.md`](./docs/threat-model.md).
+`[PLANNED]` — full threat model in [`docs/threat-model.md`](./docs/threat-model.md).
 
 Planned coverage: authentication and authorization boundaries, least-privilege
 database access, input validation, parameterized queries only, secrets via
@@ -402,14 +401,15 @@ Honest list, updated as the build proceeds:
 
 1. **Nothing is implemented.** Phase 0 has produced design decisions and agent
    skills only.
-2. Single configured currency, `i64` minor units â€” a second currency with a
+2. Single configured currency, `i64` minor units — a second currency with a
    different minor-unit scale needs a scale-aware `Money` type.
 3. No broker integration. The outbox is real; publication targets an in-process
    simulated consumer.
-4. `[UNSUPPORTED]` Broker-agnostic exactly-once delivery â€” not claimed, not
+4. `[UNSUPPORTED]` Broker-agnostic exactly-once delivery — not claimed, not
    attempted.
-5. Rust toolchain and a running Docker daemon are **still required and not yet
-   present** on the development machine.
+5. ~~Rust toolchain and a running Docker daemon are **still required and not yet
+   present** on the development machine.~~ **Resolved**: Rust 1.99.0 and Docker are
+   both installed and verified. See [§6](#6-quick-start).
 
 ---
 
@@ -419,14 +419,14 @@ Honest list, updated as the build proceeds:
 
 | Phase | Contents | Gate |
 |---|---|---|
-| **0** âœ… | Environment inspection, architecture decisions, agent skills, `README.md`, `progress.md` | This document exists and is accurate. |
+| **0** ✅ | Environment inspection, architecture decisions, agent skills, `README.md`, `progress.md` | This document exists and is accurate. |
 | **1** | Domain types, schema + migrations, atomic transfer, double-entry ledger, idempotency, unit + integration tests, minimal API | **INV-1..INV-7 passing** against real Postgres. |
 | **2** | Outbox, worker, retry/recovery, reconciliation, concurrency tests, deterministic fault injection | Every failure scenario asserts resulting DB state. |
 | **3** | Logs, metrics, tracing, health checks, security controls, CI, reproducible local setup | Clean-checkout run works. |
 | **4** | Load tests, before/after optimization, failure matrix, ADRs, walkthrough | Real measured numbers, reproducible. |
 | **5** | Full suite, defect fixes, clean-environment quick-start validation, documentation audit | Every claim verified. |
 
-**Definition of done** is the spec's Â§20 checklist, not "it compiles." Each phase
+**Definition of done** is the spec's §20 checklist, not "it compiles." Each phase
 is gated on its own evidence; no phase starts until the prior gate passes.
 
 ---
@@ -435,7 +435,7 @@ is gated on its own evidence; no phase starts until the prior gate passes.
 
 Every feature claim in this repository carries a status label. Benchmark numbers
 are published only after being measured, with methodology. Test results are
-reported from actual runs â€” if a check was skipped or failed, it is documented
+reported from actual runs — if a check was skipped or failed, it is documented
 as such. A passing build is not completion.
 
 > The purpose of this project is to be **independently verifiable**. A
@@ -446,7 +446,7 @@ as such. A passing build is not completion.
 
 ## License
 
-`[PLANNED]` â€” to be chosen (MIT or Apache-2.0) before the first release.
+`[PLANNED]` — to be chosen (MIT or Apache-2.0) before the first release.
 
 ## Acknowledgements
 
