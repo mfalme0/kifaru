@@ -1,4 +1,4 @@
-//! Transfer application service implementing atomic transfers with idempotency.
+//! Transfer application service implementing atomic transfers.
 
 use chrono::Utc;
 use kifaru_domain::{AccountId, Money, TransferId, TransferStatus};
@@ -29,4 +29,8 @@ pub enum TransferServiceError {
     Storage(String),
     #[error("idempotency conflict")]
     IdempotencyConflict,
+    #[error("idempotency error: {0}")]
+    Idempotency(String),
+    #[error("concurrency error")]
+    Concurrency,
 }
