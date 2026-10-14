@@ -1,11 +1,21 @@
-//! HTTP transport, background worker, and observability.
+//! HTTP transport for KIFARU.
 //!
-//! Owns the `kifaru` binary (`serve` / `worker` / `reconcile`). Contains no
-//! business rules — it validates input, maps domain errors to status codes, and
-//! delegates to `kifaru-application`.
-//!
-//! Populated in the next step of the build sequence.
+//! Contains the `kifaru` binary and the Axum router. No business rules live
+//! here: this crate validates request shape, maps failures to status codes, and
+//! delegates every decision to `kifaru-application`.
 
 #![forbid(unsafe_code)]
 
-pub use kifaru_domain as domain;
+pub mod config;
+pub mod http;
+
+pub use config::{Config, ConfigError, LogFormat};
+pub use http::{AppState, router};
+
+/// Apply pending migrations from the repository `migrations/` directory.
+///
+/// Embedded at compile time, so a binary can set up its own schema without the
+/// source tree being present at runtime.
+pub async fn migrate(pool: &sqlx::PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    sqlx::migrate!("../../migrations").run(pool).await
+}
